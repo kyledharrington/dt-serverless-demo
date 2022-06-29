@@ -3,7 +3,7 @@
   "format": "html",
   "prefix": "https://storage.googleapis.com",
   "mainga": "UA-49880327-14",
-  "updated": "2022-06-28T18:12:24-07:00",
+  "updated": "2022-06-29T08:49:52-07:00",
   "id": "dt-s3-lambda",
   "duration": 95,
   "title": "S3 + Lambda Application Lab",
