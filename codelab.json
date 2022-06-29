@@ -1,0 +1,17 @@
+{
+  "environment": "web",
+  "format": "html",
+  "prefix": "https://storage.googleapis.com",
+  "mainga": "UA-49880327-14",
+  "updated": "2022-06-28T18:00:01-07:00",
+  "id": "dt-s3-lambda",
+  "duration": 95,
+  "title": "S3 + Lambda Application Lab",
+  "summary": "Dynatrace Kubernetes Installation Options",
+  "source": "lambda.md",
+  "theme": "",
+  "status": null,
+  "category": null,
+  "tags": [],
+  "url": "dt-s3-lambda"
+}

@@ -1,0 +1,287 @@
+
+<!doctype html>
+
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1.0, user-scalable=yes">
+  <meta name="theme-color" content="#4F7DC9">
+  <meta charset="UTF-8">
+  <title>S3 &#43; Lambda Application Lab</title>
+  <link rel="stylesheet" href="//fonts.googleapis.com/css?family=Source+Code+Pro:400|Roboto:400,300,400italic,500,700|Roboto+Mono">
+  <link rel="stylesheet" href="//fonts.googleapis.com/icon?family=Material+Icons">
+  <link rel="stylesheet" href="https://storage.googleapis.com/codelab-elements/codelab-elements.css">
+  <style>
+    .success {
+      color: #1e8e3e;
+    }
+    .error {
+      color: red;
+    }
+  </style>
+</head>
+<body>
+  <google-codelab-analytics gaid="UA-49880327-14"></google-codelab-analytics>
+  <google-codelab codelab-gaid=""
+                  id="dt-s3-lambda"
+                  title="S3 &#43; Lambda Application Lab"
+                  environment="web"
+                  feedback-link="">
+    
+      <google-codelab-step label="Overview" duration="5">
+        <p>What You&#39;ll Learn Today</p>
+<p>Today, we will deploy a sample app flow which has a React Frontend hosted on a S3 bucket calling a Lambda function via API Gateway. This Lambda function calls DynamoDB for its backend and we will able setup Dynatrace on all of these components to get a true end to end flow including RUM.</p>
+<p>The sample app will have a simple form on the frontend where a user will be able to send a message and this message will then be saved in the DynamoDB table.</p>
+<p>High level architecture diagram of our setup: <img alt="Diagram" src="img/79969499d7c3789b.png"></p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Pre-Requisites" duration="5">
+        <ul>
+<li>Have Admin Access to Dynatrace SaaS Tenant</li>
+<li>Have access to AWS Console with permissions to create S3 Buckets, API Gateways, Lambda Functions and DynamoDB Tables.</li>
+<li>Permissions must include IAM permissions to create users, roles and policies.</li>
+<li>NOTE: The SE AWS Account does not provide us permissions to create users in IAM (which we require for one of the setups) so would recommend using a combination of the SE Account and a personal account for this lab.</li>
+<li>Have Amazon CLI locally installed -&gt; <a href="https://aws.amazon.com/cli/" target="_blank">https://aws.amazon.com/cli/</a></li>
+</ul>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Technical Specification" duration="5">
+        <p>Technologies We Will Work With Today</p>
+<ul>
+<li>Dynatrace SaaS Tenant</li>
+<li>AWS Console</li>
+<li>AWS CLI</li>
+<li>Dynatrace Agentless RUM</li>
+<li>Dynatrace OneAgent Lambda Extension</li>
+</ul>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Setup: DynamoDB" duration="5">
+        <p>We&#39;re going to work our way from back to front starting with the setup for DynamoDB and ending with the React Frontend in S3</p>
+<ol type="1">
+<li>In the AWS Management Console, click on the search bar and type DynamoDB <img alt="Image" src="img/c66947eb0606543c.png"></li>
+<li>Click on the button to create a table <img alt="Image" src="img/aa739d629281002d.png"></li>
+<li>Populate the table name and set ‘date&#39; as a primary key (‘Number&#39; as the type). Leave everything else with default options and then choose ‘Create&#39; in the bottom right <img alt="Image" src="img/cc20258ae267de0a.png"><img alt="Image" src="img/c595da06a52ad1a8.png"></li>
+<li>Validate that the table is created successfully <img alt="Image" src="img/844b13d4cc2e0498.png"></li>
+</ol>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Setup: Lambda Function Part 1" duration="15">
+        <p>Next we&#39;ll Configure the lambda fuction</p>
+<ol type="1">
+<li>In the AWS Management Console, search for Lambda <img alt="Image" src="img/60e56c689aec4805.png"></li>
+<li>Click on the ‘Create function&#39; button to get started <img alt="Image" src="img/58b525987c12d137.png"></li>
+<li>We are going to create a function using the ‘Author from scratch&#39; option, without any preconfigured templates. Populate the table with the following information and then press ‘Create function&#39; <img alt="Image" src="img/8af2152331df81c.png"></li>
+<li>We are selecting Node.js 14 as our runtime instead of the default Node.js 16 because 16 isn&#39;t supported by Dynatrace at the time of writing (support is being actively developed)</li>
+<li>Copy the sample code below to your function  <pre><code>```javascript
+    const AWS = require(&#39;aws-sdk&#39;);
+    const docClient = new AWS.DynamoDB.DocumentClient({region: &#34;us-east-1&#34;});
+
+
+    exports.handler = (event, context, callback) =&gt; {
+        console.log(&#34;Processing...&#34;);
+        console.log(&#34;EVENT: \n&#34; + JSON.stringify(event, null, 2));
+        console.log(&#34;KEY VALUE: &#34;+ event.body.key1);
+        const params = {
+            Item: {
+                date: Date.now(),
+                message: event.body.key1
+            },
+            TableName: &#34;lab_dynamodb&#34;
+        };
+        const response = {
+        statusCode: 200,
+        headers: {
+        &#39;Access-Control-Allow-Origin&#39;: &#39;*&#39;,
+        &#39;Access-Control-Allow-Credentials&#39;: true,
+        },
+        body: JSON.stringify(&#39;Hello from new Lambda!&#39;),
+    };
+
+
+        docClient.put(params, function(err, data) {
+            if(err){
+                callback(err, null);
+            } else {
+                callback(null, data);
+            }
+        })
+    };
+```
+</code></pre>
+<strong>Please note:</strong>  <ul>
+<li>Remember to put the region corresponding to your case in line 2</li>
+<li>Lines 8-9 indicate that DynamoDB will receive an object from the Lambda function containing a date and a message in the ‘object.body.key1&#39; property</li>
+<li>Line 11 must indicate the name of the table you create in DynamoDB. In my case, it was ‘lab_dynamodb&#39;</li>
+</ul>
+</li>
+<li>Deploy your code changes <img alt="Image" src="img/6ed8e319d4e7fb72.png"></li>
+<li>Our Lambda function does not have the permission to connect to the DynamoDB instance yet. Let&#39;s address that by navigating to ‘IAM&#39; <img alt="Image" src="img/459dab1471a020c7.png"></li>
+<li>Select ‘Roles&#39; from the left hand menu and look for the role name with your Lambda function name <img alt="Image" src="img/b4e69f4b4f4b79df.png"></li>
+<li>Click on ‘Add permissions&#39; and then select ‘Create inline policy&#39; <img alt="Image" src="img/f2ef9982e53f2ad6.png"></li>
+<li>We are going to allow the function all actions in relation to the given table in DynamoDB. After you do this, click ‘Review policy&#39; in the bottom right, create a name and save your changes <img alt="Image" src="img/57c3e429b6d864f9.png"><img alt="Image" src="img/ccdb6de04294d3bc.png"></li>
+</ol>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Setup: Labda Function Part 2" duration="15">
+        <p>Now that the initial setup of the Lambda function is done, we can install the Dynatrace OneAgent extension to it.</p>
+<ol type="1">
+<li>Navigate to Deploy Dynatrace in your SaaS tenant, click on Start installation and then select ‘AWS Lambda&#39; <img alt="Image" src="img/422b67f43c78cd7d.png"></li>
+<li>Ensure that the displayed region and runtimes are correct. Then copy the listed values for environment variables as well as the snippet for the Lambda layer ARN <img alt="Image" src="img/1831fb2560b4cc5f.png"></li>
+<li>Add the provided values to the environment variables in the Lambda function <img alt="Image" src="img/639bb66b5aad6f1e.png"></li>
+<li>Click on Layers in the Function overview to add the layer <img alt="Image" src="img/37265cefe106230a.png"></li>
+<li>Select the option for ‘Specify an ARN&#39; and paste the value from the Dynatrace UI. Click on ‘Verify&#39; and then ‘Add&#39; <img alt="Image" src="img/1d149f0947f3c95d.png"></li>
+<li>Select Actions and then ‘Publish new version&#39; <img alt="Image" src="img/2059dedbb89ec213.png"></li>
+<li>Generate some traffic but running a few tests from the AWS Console and validate that you see the Service showing up in the Dynatrace UI <img alt="Image" src="img/e6d55dfe902a1de2.png"><img alt="Image" src="img/3e97d5ddd55eba24.png"></li>
+</ol>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Set Up: API Gateway" duration="15">
+        <p>Next, we need to add a API Gateway Trigger to our AWS Lambda Function.</p>
+<ol type="1">
+<li>Do this by clicking on ‘Add trigger&#39; in the Function overview <img alt="Image" src="img/dfafe5fc3e7db2e4.png"></li>
+<li>Select API Gateway from the dropdown, fill the fields with the following inputs and hit ‘Add&#39; <img alt="Image" src="img/278e55feb7ece0f8.png"></li>
+<li>You will see the API Gateway show up in the Function overview <img alt="Image" src="img/c315840ad1aac359.png"></li>
+<li>Now, navigate to the API Gateway dashboard by clicking on the link below the Function overview <img alt="Image" src="img/a9346f9d91f9c022.png"></li>
+<li>As the user of the frontend app will be sending data, we need to create a POST method. Hence, click ‘Actions&#39;, select ‘Create Method&#39; and then in the dropdown, choose ‘POST&#39; <img alt="Image" src="img/e14d7c1db9a50b3c.png"><img alt="Image" src="img/4b8c46be76e08883.png"></li>
+<li>Configure the method as follows. Make sure to select ‘Save&#39; once you finish <img alt="Image" src="img/ac1018b66251785c.png"></li>
+<li>In order to stitch transactions end to end (from real user action to Lambda invocation), we need to pass headers (key header being x-dtc) generated by RUM instrumentation all the way through to the Lambda function. To do this, we need to adjust the settings on the API Gateway to pass the headers through. We will do this via mapping templates. More information available <a href="https://www.dynatrace.com/support/help/shortlink/aws-lambda-extension#gateway" target="_blank">at our Dynatrace support documentation</a>.</li>
+<li>To add a mapping template, select the POST method and click on ‘Integration Request&#39; <img alt="Image" src="img/9f736f0e0f1b8ead.png"></li>
+<li>Expand on Mapping Templates to add the template <img alt="Image" src="img/bd6ed303b48d31ea.png"></li>
+<li>This is the sample provided by the Dynatrace documentation <img alt="Image" src="img/143bffe59a5ac6a8.png"></li>
+<li>It is important to note that this mapping replaces the entire payload which is being sent to our Lambda function, which means we must ensure this mapping also carries forward any required attributes which are needed for the Lambda processing. In our case, this means we need to carry forward the end user input from the frontend React application by ensuring we include the $input in our mapping template such that it was included in the payload sent to Lambda. Note the addition in the Mapping Template the example:  <pre><code>&#34;body&#34;: $input.json(&#39;$&#39;),
+</code></pre>
+</li>
+<li>This is needed to be able to carry through our user input which could then be processed by the Lambda function. Be sure to save the template afterwards. <img alt="Image" src="img/5e129522e9d01c60.png"></li>
+<li>We also need to enable CORS on the API Gateway (The React application will utilize CORS and Dynatrace will use the x-dtc header for tracing XHR calls) To enable CORS, click on Actions, select ‘Enable CORS&#39;, make sure to add the x-dtc header to the allow-list and select the Enable button: <img alt="Image" src="img/5434b04e8fa8c0ef.png"><img alt="Image" src="img/9c9b7942c4028b90.png"></li>
+<li>Deploy the API (you can select the ‘default&#39; Deployment stage)</li>
+</ol>
+<p class="image-container"><img alt="Image" src="img/61245b4eda0b3009.png"><img alt="Image" src="img/c49152ed7ee75595.png"></p>
+<p>Our API Gateway -&gt; Lambda -&gt; DynamoDB set up is now complete. We will next focus on the frontend</p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Set Up: React Frontend on S3" duration="15">
+        <p><strong><em>NOTE:</em></strong> You will need to execute this particular setup in a personal AWS account because the SE Account does not provide us permissions to create a user in IAM which is something we require.</p>
+<ol type="1">
+<li>In the AWS Management Console, search for ‘S3&#39; <img alt="Image" src="img/612565229c2291b6.png"></li>
+<li>Select the ‘Create bucket&#39; button to create a new S3 bucket <img alt="Image" src="img/42f7b94d89d867eb.png"></li>
+<li>Provide a name, region, disable blocking of public access and then create bucket (Leave everything else as default) <img alt="Image" src="img/96d92fc05f53f9a4.png"><img alt="Image" src="img/294cef488fdcebaf.png"><img alt="Image" src="img/b12e37544fcc6840.png"></li>
+<li>Next, we need to set up a user that can access the S3 service from the AWS CLI which is where we will be running the commands to deploy our frontend application. Go to IAM, and select ‘Users&#39; from the left hand menu and then click on ‘Add users&#39; <img alt="Image" src="img/94098d96fc74f8e4.png"></li>
+<li>Enter a name of your choice and select the box for Programmatic access. Click on ‘Next: Permissions&#39; <img alt="Image" src="img/66507ad9cb026b00.png"></li>
+<li>We will now assign this user full access to S3. Select the ‘Attach existing policies directly&#39; option and select ‘AmazonS3FullAccess&#39; from the list <img alt="Image" src="img/f2216eed4fbd8a5a.png"></li>
+<li>Leave all other settings as default and create the IAM user. Make sure to copy the Access key ID and Secret access key displayed at the end. We will need this for the CLI <img alt="Image" src="img/b7fd3d1bae7f62dc.png"></li>
+<li>Now that we have a user created, we&#39;re going to access the S3 service from the CLI and deploy our frontend. Download or clone the repo <a href="https://github.com/gulikholmatova/serverless-app" target="_blank">from this location</a></li>
+<li>For simplicity&#39;s sake, you can locally download the zip file for the repo and unzip it.</li>
+<li>Run the following command on your CLI to set up AWS Credentials  <pre><code>aws configure
+</code></pre>
+</li>
+<li>Provide the Access Key ID and Secret Access key, leave the default region name and output format blank</li>
+<li>To make sure everything is set up properly, run this command which will output the list of buckets you have on S3  <pre><code>aws s3 ls
+</code></pre>
+<img alt="Image" src="img/24c9fa518da82bf3.png"></li>
+<li>Go to the directory where you unzipped the repo and run this command to create the production build (you will need to install yarn if you already don&#39;t have it) -&gt; yarn build <img alt="Image" src="img/9aba18e4b48afa6b.png"></li>
+<li>go to the folder where the repo was unzipped, look for the package.json file and add to the kson: &#34;deploy&#34;: &#34;aws s3 sync build/ s3://lab-lambda-s3bucket&#34; Also change the homepage to &#34;.&#34; <img alt="Image" src="img/52a44ee947f2520f.png"></li>
+<li>This command uses the AWS CLI to sync the build folder with the S3 bucket</li>
+<li>We&#39;ll set up our bucket to be a static web hosting platform. Go to the S3 dashboard and select your bucket. Under the ‘properties&#39; tab, select ‘static web hosting&#39; and check the ‘user this bucket to host a website&#39; box. Then fill the index document as ‘index.html&#39; <img alt="Image" src="img/65963147e1c73d4f.png"></li>
+<li>Save your changes and make note of the endpoint of the form. This is the URL we will use to access the application from the browser. <img alt="Image" src="img/a8486acafc1ada0b.png"></li>
+<li>Next, we&#39;ll need to add a policy that allows access to the bucket and in turn the application (you might have noticed the URL in the previous step giving you a 403) Go the ‘permissions&#39; tab of your bucket and click on ‘Edit&#39; for the Bucket policy <img alt="Image" src="img/ce7ca030d44e0366.png"></li>
+<li>Add the policy below, make sure the Resource field matches your bucket name and save your changes  <pre><code>{
+    &#34;Version&#34;: &#34;2012-10-17&#34;,
+    &#34;Statement&#34;: [
+        {
+            &#34;Sid&#34;: &#34;AllowPublicReadAccess&#34;,
+            &#34;Effect&#34;: &#34;Allow&#34;,
+            &#34;Principal&#34;: &#34;*&#34;,
+            &#34;Action&#34;: &#34;s3:GetObject&#34;,
+            &#34;Resource&#34;: &#34;arn:aws:s3:::lab-lambda-s3bucket/*&#34;
+        }
+    ]
+}
+</code></pre>
+<img alt="Image" src="img/96fe79e2c34dabde.png"></li>
+<li>Finally, we need to enable CORS headers since the React Application and API Gateway are on different domains.Under ‘permissions&#39;, click on ‘Edit&#39; for CORS <img alt="Image" src="img/ea9e6961e3058a8b.png"></li>
+<li>Use the following JSON which adds all the methods we need and save changes  <pre><code>[
+    {
+        &#34;AllowedHeaders&#34;: [
+            &#34;*&#34;
+        ],
+        &#34;AllowedMethods&#34;: [
+            &#34;GET&#34;,
+            &#34;HEAD&#34;,
+            &#34;POST&#34;
+        ],
+        &#34;AllowedOrigins&#34;: [
+            &#34;*&#34;
+        ],
+        &#34;ExposeHeaders&#34;: []
+    }
+]
+</code></pre>
+</li>
+<li>Your final view should look something like this: <img alt="Image" src="img/c0d2aaf1f024a93e.png"></li>
+<li>Head back to the CLI and deploy the React application to S3 using the following command  <pre><code>yarn deploy
+</code></pre>
+<img alt="Image" src="img/e35a5ba28fa0b5b0.png"></li>
+<li>Go to the URL from the step where we set up static web hosting and make sure you can access the website <img alt="Image" src="img/79cb8a9cb4efae97.png"></li>
+<li>We need to make one last change. Look for the ‘form.js&#39; file in the ‘src&#39; directory of the repo and change line 27 to the API Gateway we set up earlier <img alt="Image" src="img/3f61a657be5f1782.png"></li>
+<li>Redeploy using yarn and validate that you can now see your form entries in the DynamoDB table <img alt="Image" src="img/2ea6abfa2afdea4a.png"><img alt="Image" src="img/5c6d490a8d2c1a4b.png"></li>
+</ol>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Set up an agentless application in the Dynatrace" duration="5">
+        <p>We&#39;re almost done with the lab! Last thing we&#39;ll do is configure agentless RUM on the frontend to get that full end to end flow from S3 -&gt; Lambda -&gt; DynamoDB</p>
+<ol type="1">
+<li>Create an Agentless application in Dynatrace <img alt="Image" src="img/4652a04359709a97.png"></li>
+<li>Go to ‘Setup&#39; in your created application&#39;s settings and grab the insertion method of choice. For this lab we&#39;ll use the Agentless JavaScript tag approach <img alt="Image" src="img/d5f906b3ad2238ae.png"></li>
+<li>Add the JS tag to the ‘index.html&#39; doc in the ‘public&#39; folder of the repo <img alt="Image" src="img/e6189436916e521f.png"></li>
+<li>Redeploy the app using yarn and validate that the JS tag is loaded via dev tools <img alt="Image" src="img/70340293ea9572ce.png"></li>
+<li>We need to make one last change on the Dynatrace side to enable CORS on the Application. Go to Settings -&gt; Capturing -&gt; Advanced setup and add the API Gateway endpoint to the Enable RUM for CORS section <img alt="Image" src="img/5386fec4f79577e8.png"></li>
+<li>Generate traffic and ensure you get the end to end flow <img alt="Image" src="img/3cb2db5a1fdd069b.png"><img alt="Image" src="img/58d7accaab395578.png"><img alt="Image" src="img/e6b3b0abd0bf25fa.png"></li>
+</ol>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Setup: Enable Session Replay" duration="5">
+        <ol type="1">
+<li>Enable Session Replay for the created application and see what sort of additional visibility you can get <img alt="Image" src="img/502410f43702d634.png"></li>
+<li>Create user action naming rules to make your XHR actions more descriptive <img alt="Image" src="img/7cfd2312c38c0654.png"></li>
+<li>The calls to DynamoDB will initially show up in the ‘requests to public networks&#39; service. Create a Service just for DynamoDB by filtering on the requests and using the option to ‘Monitor as separate service&#39; <img alt="Image" src="img/10be351d0dbee039.png"></li>
+<li>Set up the AWS Integration to get additional metrics <img alt="Image" src="img/7cfd2312c38c0654.png"></li>
+</ol>
+<p><strong>Congratulations! You have successfully set up a sample application from scratch and instrumented Dynatrace across every step to gain end to end visibility!</strong></p>
+
+
+      </google-codelab-step>
+    
+      <google-codelab-step label="Clean Up" duration="5">
+        <p>Once you are done with the lab, please be sure to delete your S3 bucket, API Gateways, Lambda function and DynamoDB</p>
+
+
+      </google-codelab-step>
+    
+  </google-codelab>
+
+  <script src="https://storage.googleapis.com/codelab-elements/native-shim.js"></script>
+  <script src="https://storage.googleapis.com/codelab-elements/custom-elements.min.js"></script>
+  <script src="https://storage.googleapis.com/codelab-elements/prettify.js"></script>
+  <script src="https://storage.googleapis.com/codelab-elements/codelab-elements.js"></script>
+  <script src="//support.google.com/inapp/api.js"></script>
+
+</body>
+</html>
